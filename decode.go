@@ -659,10 +659,18 @@ func (dec *Decoder) decodeInterface(ityp reflect.Type, state *decoderState, valu
 	if len(name) > 1024 {
 		errorf("name too long (%d bytes): %.20q...", len(name), name)
 	}
+
 	// The concrete type must be registered.
-	typi, ok := nameToConcreteType.Load(string(name))
+	var typi interface{}
+	var ok bool
+	if dec.nameToConcreteType != nil {
+		typi, ok = dec.nameToConcreteType.Load(string(name))
+	}
 	if !ok {
-		errorf("name not registered for interface: %q", name)
+		typi, ok = nameToConcreteType.Load(string(name))
+		if !ok {
+			errorf("name not registered for interface: %q", name)
+		}
 	}
 	typ := typi.(reflect.Type)
 

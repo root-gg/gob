@@ -7,6 +7,7 @@ package gob
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"sync"
@@ -25,15 +26,16 @@ const tooBig = (1 << 30) << (^uint(0) >> 62)
 // and its limits are not configurable. Take caution when decoding gob data
 // from untrusted sources.
 type Decoder struct {
-	mutex        sync.Mutex                              // each item must be received atomically
-	r            io.Reader                               // source of the data
-	buf          decBuffer                               // buffer for more efficient i/o from r
-	wireType     map[typeId]*wireType                    // map from remote ID to local description
-	decoderCache map[reflect.Type]map[typeId]**decEngine // cache of compiled engines
-	ignorerCache map[typeId]**decEngine                  // ditto for ignored objects
-	freeList     *decoderState                           // list of free decoderStates; avoids reallocation
-	countBuf     []byte                                  // used for decoding integers while parsing messages
-	err          error
+	mutex              sync.Mutex                              // each item must be received atomically
+	r                  io.Reader                               // source of the data
+	buf                decBuffer                               // buffer for more efficient i/o from r
+	wireType           map[typeId]*wireType                    // map from remote ID to local description
+	decoderCache       map[reflect.Type]map[typeId]**decEngine // cache of compiled engines
+	ignorerCache       map[typeId]**decEngine                  // ditto for ignored objects
+	freeList           *decoderState                           // list of free decoderStates; avoids reallocation
+	countBuf           []byte                                  // used for decoding integers while parsing messages
+	err                error
+	nameToConcreteType *sync.Map // map[string]reflect.Type
 }
 
 // NewDecoder returns a new decoder that reads from the io.Reader.
@@ -52,6 +54,27 @@ func NewDecoder(r io.Reader) *Decoder {
 	dec.countBuf = make([]byte, 9) // counts may be uint64s (unlikely!), require 9 bytes
 
 	return dec
+}
+
+func (dec *Decoder) RegisterName(name string, value interface{}) {
+	if name == "" {
+		// reserved for nil
+		panic("attempt to register empty name")
+	}
+
+	if dec.nameToConcreteType == nil {
+		dec.nameToConcreteType = &sync.Map{}
+	}
+
+	ut := userType(reflect.TypeOf(value))
+
+	// Check for incompatible duplicates. The name must refer to the
+	// same user type, and vice versa.
+
+	// Store the name and type provided by the user....
+	if t, dup := dec.nameToConcreteType.LoadOrStore(name, reflect.TypeOf(value)); dup && t != ut.user {
+		panic(fmt.Sprintf("gob: registering duplicate types for %q: %s != %s", name, t, ut.user))
+	}
 }
 
 // recvType loads the definition of a type.
